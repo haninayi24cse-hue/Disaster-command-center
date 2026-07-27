@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disaster Command Center v4.0</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-main: #090d16;
+            --card-bg: rgba(17, 24, 39, 0.85);
+            --card-border: rgba(56, 189, 248, 0.15);
+            --accent-cyan: #38bdf8;
+            --accent-blue: #2563eb;
+            --danger-red: #ef4444;
+            --warning-orange: #f97316;
+            --safe-green: #10b981;
+            --text-main: #f3f4f6;
+            --text-sub: #9ca3af;
+            --radius: 20px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+
+        body {
+            background-color: var(--bg-main);
+            background-image: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08), transparent 70%);
+            color: var(--text-main);
+            padding: 1.2rem;
+            min-height: 100vh;
+        }
+
+        body.red-alert-active {
+            background-color: #110405;
+            background-image: radial-gradient(circle at 50% 50%, rgba(239, 68, 68, 0.2) 0%, transparent 80%);
+        }
+
+        .top-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            background: var(--card-bg); border: 1px solid var(--card-border);
+            padding: 0.8rem 1.5rem; border-radius: var(--radius); margin-bottom: 1rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .brand-title {
+            font-family: 'Chakra Petch', sans-serif; font-size: 1.1rem;
+            color: var(--accent-cyan); display: flex; align-items: center; gap: 0.5rem;
+        }
+
+        .status-dot { width: 9px; height: 9px; background: var(--safe-green); border-radius: 50%; box-shadow: 0 0 10px var(--safe-green); }
+
+        .disaster-banner {
+            display: none; border-radius: 16px; padding: 0.8rem 1.2rem;
+            margin-bottom: 1rem; backdrop-filter: blur(10px); transition: all 0.3s;
+        }
+        .disaster-banner.active { display: flex; justify-content: space-between; align-items: center; }
+        .disaster-banner.red { background: rgba(239, 68, 68, 0.2); border: 1px solid var(--danger-red); color: #fca5a5; }
+        .disaster-banner.orange { background: rgba(249, 115, 22, 0.2); border: 1px solid var(--warning-orange); color: #fdba74; }
+        .disaster-banner.green { background: rgba(16, 185, 129, 0.15); border: 1px solid var(--safe-green); color: #6ee7b7; }
+
+        .alert-badge {
+            font-family: 'Chakra Petch', sans-serif; font-weight: 700;
+            padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.75rem; color: white;
+        }
+        .alert-badge.red { background: var(--danger-red); animation: pulse 1s infinite alternate; }
+        .alert-badge.orange { background: var(--warning-orange); }
+        .alert-badge.green { background: var(--safe-green); }
+
+        @keyframes pulse { from { opacity: 1; } to { opacity: 0.4; } }
+
+        .bento-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 1rem; }
+
+        .bento-card {
+            background: var(--card-bg); border: 1px solid var(--card-border);
+            border-radius: var(--radius); padding: 1.2rem; backdrop-filter: blur(16px);
+            display: flex; flex-direction: column; justify-content: space-between;
+        }
+
+        .card-title {
+            font-family: 'Chakra Petch', sans-serif; font-size: 0.78rem;
+            color: var(--accent-cyan); text-transform: uppercase; letter-spacing: 1px;
+            margin-bottom: 0.8rem; display: flex; justify-content: space-between; align-items: center;
+        }
+
+        .card-controls { grid-column: span 12; }
+        .card-main-weather { grid-column: span 12; }
+        .card-emergency { grid-column: span 12; }
+        .card-sub-metric { grid-column: span 6; }
+
+        @media (min-width: 1024px) {
+            .card-controls { grid-column: span 3; }
+            .card-main-weather { grid-column: span 6; }
+            .card-emergency { grid-column: span 3; }
+            .card-sub-metric { grid-column: span 3; }
+        }
+
+        .chart-wrapper { position: relative; height: 160px; width: 100%; margin-top: 0.5rem; }
+
+        .btn-gps {
+            width: 100%; padding: 0.75rem; background: rgba(56, 189, 248, 0.1);
+            border: 1px solid var(--accent-cyan); border-radius: 12px; color: var(--accent-cyan);
+            font-weight: 700; cursor: pointer; font-family: 'Chakra Petch', sans-serif; margin-bottom: 0.8rem;
+        }
+        .form-group { margin-bottom: 0.6rem; }
+        .form-group label { display: block; font-size: 0.7rem; color: var(--text-sub); margin-bottom: 0.2rem; }
+        select {
+            width: 100%; padding: 0.6rem; background: rgba(6, 9, 19, 0.8);
+            border: 1px solid var(--card-border); border-radius: 8px; color: var(--text-main); outline: none; font-size: 0.8rem;
+        }
+        .btn-submit {
+            width: 100%; padding: 0.75rem; background: linear-gradient(135deg, var(--accent-blue), #1d4ed8);
+            border: none; border-radius: 12px; color: white; font-weight: 700; cursor: pointer;
+            font-family: 'Chakra Petch', sans-serif; margin-top: 0.4rem;
+        }
+
+        .emergency-box {
+            background: rgba(239, 68, 68, 0.08); border: 1px dashed var(--danger-red);
+            border-radius: 12px; padding: 0.8rem; margin-bottom: 0.8rem;
+        }
+        .emergency-item { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 0.3rem; }
+        .emergency-item strong { color: #fca5a5; font-family: 'Chakra Petch', sans-serif; }
+
+        .metric-val { font-size: 1.5rem; font-weight: 700; font-family: 'Chakra Petch', sans-serif; margin: 0.3rem 0; }
+        .metric-sub { font-size: 0.72rem; color: var(--text-sub); }
+
+        #map { width: 100%; height: 160px; border-radius: 12px; border: 1px solid var(--card-border); }
+
+        .btn-voice {
+            padding: 0.5rem 1rem; background: rgba(56, 189, 248, 0.15);
+            border: 1px solid var(--accent-cyan); border-radius: 10px; color: var(--accent-cyan);
+            font-size: 0.75rem; font-weight: 700; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="top-bar">
+        <div class="brand-title">
+            <div class="status-dot"></div> DISASTER COMMAND CENTER v4.0
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-sub); font-family: 'Chakra Petch';" id="sysClock">--:--:-- UTC</div>
+    </header>
+
+    <div id="alertBanner" class="disaster-banner">
+        <div>
+            <span id="alertTypeBadge" class="alert-badge">ALERT</span>
+            <strong id="alertBannerTitle" style="margin-left: 0.5rem;">WEATHER MONITORING</strong>
+        </div>
+        <span id="alertBannerSub" style="font-size: 0.75rem;">Connecting to Java Backend...</span>
+    </div>
+
+    <div class="bento-grid">
+
+        <!-- CARD 1: SECTOR CONTROL -->
+        <div class="bento-card card-controls">
+            <div class="card-title">📍 Sector Control</div>
+            <button class="btn-gps" id="detectGpsBtn">🎯 DETECT GPS LOCATION</button>
+            
+            <form id="controlForm">
+                <div class="form-group"><label>Country</label><select id="countrySelect"><option value="">Loading...</option></select></div>
+                <div class="form-group"><label>State</label><select id="stateSelect" disabled><option value="">Select Country First</option></select></div>
+                <div class="form-group"><label>City</label><select id="citySelect" disabled><option value="">Select State First</option></select></div>
+                <button type="submit" class="btn-submit">🛰️ SCAN WEATHER & RISK</button>
+            </form>
+        </div>
+
+        <!-- CARD 2: MAIN WEATHER & HOURLY GRAPH -->
+        <div class="bento-card card-main-weather">
+            <div class="card-title">
+                <span>📡 Java Telemetry</span>
+                <span id="targetLocationTag" style="color: var(--accent-cyan);">LOCATING...</span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                <div>
+                    <span style="font-size: 0.85rem; color: var(--text-sub);" id="weatherCondition">Scanning...</span>
+                    <span style="font-size: 1.8rem; font-weight: 800; font-family: 'Chakra Petch'; margin-left: 0.5rem;"><span id="hudTemp">--</span>°C</span>
+                </div>
+                <button class="btn-voice" onclick="speakAlert()">🎙️ VOICE ALERT</button>
+            </div>
+
+            <div class="chart-wrapper">
+                <canvas id="weatherChart"></canvas>
+            </div>
+        </div>
+
+        <!-- CARD 3: EMERGENCY HOTLINES & SOS -->
+        <div class="bento-card card-emergency">
+            <div class="card-title">📞 Emergency Hotlines</div>
+            <div class="emergency-box">
+                <div class="emergency-item"><span>NDRF Disaster:</span> <strong>1078</strong></div>
+                <div class="emergency-item"><span>Emergency Resp:</span> <strong>112</strong></div>
+                <div class="emergency-item"><span>Ambulance:</span> <strong>108</strong></div>
+                <div class="emergency-item"><span>Fire Brigade:</span> <strong>101</strong></div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: auto;">
+                <button style="padding:0.65rem; background:rgba(37, 211, 102, 0.2); border:1px solid #25D366; border-radius:10px; color:#25D366; font-weight:bold; cursor:pointer;" onclick="sendWhatsAppSOS()">💬 WHATSAPP SOS</button>
+                <button style="padding:0.65rem; background:rgba(239, 68, 68, 0.2); border:1px solid var(--danger-red); border-radius:10px; color:#fca5a5; font-weight:bold; cursor:pointer;" onclick="playSiren()">🔊 SOUND SOS SIREN</button>
+            </div>
+        </div>
+
+        <!-- CARD 4: WIND & HUMIDITY -->
+        <div class="bento-card card-sub-metric">
+            <div class="card-title">💨 Wind & Humidity</div>
+            <div>
+                <div class="metric-val" id="hudWind">-- km/h</div>
+                <div class="metric-sub" id="hudHum">Humidity: --%</div>
+            </div>
+        </div>
+
+        <!-- CARD 5: PRESSURE & RAIN -->
+        <div class="bento-card card-sub-metric">
+            <div class="card-title">⏲️ Pressure & Rain</div>
+            <div>
+                <div class="metric-val" id="hudPressure">-- mb</div>
+                <div class="metric-sub" id="hudRain">Rainfall: 0 mm/h</div>
+            </div>
+        </div>
+
+        <!-- CARD 6: AQI & UV INDEX -->
+        <div class="bento-card card-sub-metric">
+            <div class="card-title">🟢 Air Quality & UV</div>
+            <div>
+                <div class="metric-val" id="hudAqi">-- <small style="font-size: 0.7rem; color: var(--safe-green);">AQI</small></div>
+                <div class="metric-sub" id="hudUv">UV Index: --</div>
+            </div>
+        </div>
+
+        <!-- CARD 7: INTERACTIVE RADAR MAP -->
+        <div class="bento-card card-sub-metric">
+            <div class="card-title">MAP Sector Radar Map</div>
+            <div id="map"></div>
+        </div>
+
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // Leaflet setup
+        const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+        let map = L.map('map', { zoomControl: false, layers: [darkLayer] }).setView([20.5937, 78.9629], 5);
+
+        let activeMarker = null, activeCircle = null, rainRadarLayer = null;
+        let lastAlertMessage = "";
+        let weatherChart = null;
+
+        setInterval(() => {
+            const clock = document.getElementById('sysClock');
+            if (clock) clock.textContent = new Date().toUTCString().split(' ')[4] + ' UTC';
+        }, 1000);
+
+        function speakAlert() {
+            if ('speechSynthesis' in window && lastAlertMessage) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(lastAlertMessage);
+                utterance.rate = 0.9;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function playSiren() {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(440, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.5);
+            osc.start();
+            setTimeout(() => { osc.stop(); ctx.close(); }, 1500);
+        }
+
+        function sendWhatsAppSOS() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    const lat = pos.coords.latitude, lon = pos.coords.longitude;
+                    const mapsUrl = `https://maps.google.com/?q=${lat},${lon}`;
+                    const text = encodeURIComponent(`🚨 EMERGENCY DISASTER SOS! 🚨\nI need immediate help! My Location: ${mapsUrl}`);
+                    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+                });
+            } else {
+                alert("Location not available.");
+            }
+        }
+
+        function addLiveRainRadar() {
+            const radarTileUrl = 'https://tilecache.rainviewer.com/v2/radar/nowcast/256/{z}/{x}/{y}/2/1_1.png';
+            if (rainRadarLayer) map.removeLayer(rainRadarLayer);
+            rainRadarLayer = L.tileLayer(radarTileUrl, { opacity: 0.6, tileSize: 256 }).addTo(map);
+        }
+
+        // 🚀 CONNECTED TO JAVA BACKEND (PORT 8080)
+        async function updateDashboardByCoords(coords, cityName, countryName) {
+            document.getElementById('targetLocationTag').textContent = `${cityName.toUpperCase()}, ${countryName.toUpperCase()}`;
+            
+            const backendUrl = `http://localhost:8080/api/v1/weather/telemetry?lat=${coords[0]}&lon=${coords[1]}&city=${encodeURIComponent(cityName)}&country=${encodeURIComponent(countryName)}`;
+
+            try {
+                const res = await fetch(backendUrl);
+                const data = await res.json();
+
+                // Telemetry from Java
+                document.getElementById('hudTemp').textContent = Math.round(data.temperature);
+                document.getElementById('hudWind').textContent = `${data.windSpeed} km/h`;
+                document.getElementById('hudHum').textContent = `Humidity: ${data.humidity}%`;
+                document.getElementById('hudPressure').textContent = `${data.pressure} mb`;
+                document.getElementById('hudRain').textContent = `Rainfall: ${data.rainfall} mm/h`;
+                document.getElementById('weatherCondition').textContent = data.alertMessage || "Safe";
+
+                // Alerts logic from Java Backend Response
+                const alertBanner = document.getElementById('alertBanner');
+                const alertTypeBadge = document.getElementById('alertTypeBadge');
+                
+                alertBanner.className = 'disaster-banner active';
+                document.body.classList.remove('red-alert-active');
+                let accentColor = "#10b981";
+
+                if (data.alertLevel === "RED") {
+                    accentColor = "#ef4444";
+                    document.body.classList.add('red-alert-active');
+                    alertBanner.className = 'disaster-banner active red';
+                    alertTypeBadge.className = 'alert-badge red';
+                    alertTypeBadge.textContent = "RED ALERT";
+                    document.getElementById('alertBannerTitle').textContent = `HEAVY RAIN WARNING - ${cityName.toUpperCase()}`;
+                    document.getElementById('alertBannerSub').textContent = data.alertMessage;
+                    lastAlertMessage = `Red alert warning for ${cityName}. Heavy rainfall active.`;
+                } else if (data.alertLevel === "ORANGE") {
+                    accentColor = "#f97316";
+                    alertBanner.className = 'disaster-banner active orange';
+                    alertTypeBadge.className = 'alert-badge orange';
+                    alertTypeBadge.textContent = "ORANGE ALERT";
+                    document.getElementById('alertBannerTitle').textContent = `MODERATE RAIN WATCH - ${cityName.toUpperCase()}`;
+                    document.getElementById('alertBannerSub').textContent = data.alertMessage;
+                    lastAlertMessage = `Orange alert in ${cityName}. Moderate rainfall detected.`;
+                } else {
+                    accentColor = "#10b981";
+                    alertBanner.className = 'disaster-banner active green';
+                    alertTypeBadge.className = 'alert-badge green';
+                    alertTypeBadge.textContent = "CLEAR";
+                    document.getElementById('alertBannerTitle').textContent = `CONDITIONS SAFE - ${cityName.toUpperCase()}`;
+                    document.getElementById('alertBannerSub').textContent = data.alertMessage;
+                    lastAlertMessage = `Weather in ${cityName} is clear and safe.`;
+                }
+
+                // Map Updates
+                map.setView(coords, 10);
+                if (activeMarker) map.removeLayer(activeMarker);
+                if (activeCircle) map.removeLayer(activeCircle);
+
+                activeCircle = L.circle(coords, { color: accentColor, fillColor: accentColor, fillOpacity: 0.15, radius: 5000 }).addTo(map);
+                activeMarker = L.circleMarker(coords, { color: accentColor, radius: 8 }).addTo(map);
+
+                addLiveRainRadar();
+                fetchAQI(coords[0], coords[1]);
+
+            } catch (e) {
+                console.error("Backend Connection Failed!", e);
+            }
+        }
+
+        async function fetchAQI(lat, lon) {
+            try {
+                const res = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,uv_index`);
+                const data = await res.json();
+                if (data && data.current) {
+                    document.getElementById('hudAqi').innerHTML = `${Math.round(data.current.us_aqi)} <small style="font-size: 0.7rem; color: var(--safe-green);">AQI</small>`;
+                    document.getElementById('hudUv').innerHTML = `UV Index: <b>${data.current.uv_index.toFixed(1)}</b>`;
+                }
+            } catch(e){}
+        }
+
+        function autoDetectGPSLocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(async (pos) => {
+                    const lat = pos.coords.latitude, lon = pos.coords.longitude;
+                    try {
+                        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
+                        const geoData = await geoRes.json();
+                        const addr = geoData.address || {};
+                        const exactArea = addr.suburb || addr.city || "Local Sector";
+                        updateDashboardByCoords([lat, lon], exactArea, addr.country || "India");
+                    } catch(e) {
+                        updateDashboardByCoords([lat, lon], "Local Sector", "India");
+                    }
+                }, () => {
+                    updateDashboardByCoords([23.0225, 72.5714], "Ahmedabad", "India");
+                });
+            } else {
+                updateDashboardByCoords([23.0225, 72.5714], "Ahmedabad", "India");
+            }
+        }
+
+        const countrySelect = document.getElementById('countrySelect');
+        const stateSelect = document.getElementById('stateSelect');
+        const citySelect = document.getElementById('citySelect');
+
+        async function loadCountries() {
+            try {
+                const res = await fetch('https://countriesnow.space/api/v0.1/countries/iso');
+                const data = await res.json();
+                countrySelect.innerHTML = '<option value="">-- Country --</option>';
+                data.data.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.name; opt.textContent = c.name;
+                    countrySelect.appendChild(opt);
+                });
+            } catch (e) {}
+        }
+
+        countrySelect.addEventListener('change', async () => {
+            const country = countrySelect.value;
+            stateSelect.innerHTML = '<option value="">-- State --</option>';
+            citySelect.innerHTML = '<option value="">Select State First</option>';
+            citySelect.disabled = true;
+            if (!country) return;
+
+            try {
+                const res = await fetch('https://countriesnow.space/api/v0.1/countries/states', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ country: country })
+                });
+                const data = await res.json();
+                if (data.data.states) {
+                    data.data.states.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.name; opt.textContent = s.name;
+                        stateSelect.appendChild(opt);
+                    });
+                    stateSelect.disabled = false;
+                }
+            } catch (err) {}
+        });
+
+        stateSelect.addEventListener('change', async () => {
+            const country = countrySelect.value, state = stateSelect.value;
+            citySelect.innerHTML = '<option value="">-- City --</option>';
+            citySelect.disabled = true;
+            if (!state) return;
+
+            try {
+                const res = await fetch('https://countriesnow.space/api/v0.1/countries/state/cities', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ country: country, state: state })
+                });
+                const data = await res.json();
+                if (data.data) {
+                    data.data.forEach(city => {
+                        const opt = document.createElement('option');
+                        opt.value = city; opt.textContent = city;
+                        citySelect.appendChild(opt);
+                    });
+                    citySelect.disabled = false;
+                }
+            } catch (err) {}
+        });
+
+        document.getElementById('detectGpsBtn').addEventListener('click', autoDetectGPSLocation);
+
+        document.getElementById('controlForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const country = countrySelect.value, state = stateSelect.value, city = citySelect.value;
+            if (!city) return alert("Please select a City!");
+
+            const query = `${city}, ${state || ''}, ${country}`;
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+            const data = await res.json();
+            if (data && data.length > 0) {
+                updateDashboardByCoords([parseFloat(data[0].lat), parseFloat(data[0].lon)], city, country);
+            }
+        });
+
+        loadCountries();
+        autoDetectGPSLocation();
+    </script>
+</body>
+</html>
