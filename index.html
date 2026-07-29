@@ -106,7 +106,9 @@
             width: 100%; padding: 0.75rem; background: rgba(56, 189, 248, 0.1);
             border: 1px solid var(--accent-cyan); border-radius: 12px; color: var(--accent-cyan);
             font-weight: 700; cursor: pointer; font-family: 'Chakra Petch', sans-serif; margin-bottom: 0.8rem;
+            transition: all 0.2s ease;
         }
+        .btn-gps:hover { background: rgba(56, 189, 248, 0.2); }
         .form-group { margin-bottom: 0.6rem; }
         .form-group label { display: block; font-size: 0.7rem; color: var(--text-sub); margin-bottom: 0.2rem; }
         select {
@@ -152,7 +154,7 @@
             <span id="alertTypeBadge" class="alert-badge">ALERT</span>
             <strong id="alertBannerTitle" style="margin-left: 0.5rem;">WEATHER MONITORING</strong>
         </div>
-        <span id="alertBannerSub" style="font-size: 0.75rem;">Connecting to Java Backend...</span>
+        <span id="alertBannerSub" style="font-size: 0.75rem;">Connecting telemetry...</span>
     </div>
 
     <div class="bento-grid">
@@ -173,7 +175,7 @@
         <!-- CARD 2: MAIN WEATHER & HOURLY GRAPH -->
         <div class="bento-card card-main-weather">
             <div class="card-title">
-                <span>📡 Java Telemetry</span>
+                <span>📡 Telemetry Data</span>
                 <span id="targetLocationTag" style="color: var(--accent-cyan);">LOCATING...</span>
             </div>
 
@@ -235,7 +237,7 @@
 
         <!-- CARD 7: INTERACTIVE RADAR MAP -->
         <div class="bento-card card-sub-metric">
-            <div class="card-title">MAP Sector Radar Map</div>
+            <div class="card-title">🗺️ Sector Radar Map</div>
             <div id="map"></div>
         </div>
 
@@ -250,7 +252,6 @@
 
         let activeMarker = null, activeCircle = null, rainRadarLayer = null;
         let lastAlertMessage = "";
-        let weatherChart = null;
 
         setInterval(() => {
             const clock = document.getElementById('sysClock');
@@ -286,9 +287,11 @@
                     const mapsUrl = `https://maps.google.com/?q=${lat},${lon}`;
                     const text = encodeURIComponent(`🚨 EMERGENCY DISASTER SOS! 🚨\nI need immediate help! My Location: ${mapsUrl}`);
                     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+                }, () => {
+                    alert("Location access denied or unavailable.");
                 });
             } else {
-                alert("Location not available.");
+                alert("Location not supported by your browser.");
             }
         }
 
@@ -298,14 +301,28 @@
             rainRadarLayer = L.tileLayer(radarTileUrl, { opacity: 0.6, tileSize: 256 }).addTo(map);
         }
 
-        // 🚀 CONNECTED TO JAVA BACKEND (PORT 8080)
+        // 🚀 UPDATED & FIXED DASHBOARD UPDATER
         async function updateDashboardByCoords(coords, cityName, countryName) {
             document.getElementById('targetLocationTag').textContent = `${cityName.toUpperCase()}, ${countryName.toUpperCase()}`;
             
+            // ✅ Step 1: Immediate Map Update
+            map.setView(coords, 10);
+            if (activeMarker) map.removeLayer(activeMarker);
+            if (activeCircle) map.removeLayer(activeCircle);
+
+            let accentColor = "#38bdf8";
+            activeCircle = L.circle(coords, { color: accentColor, fillColor: accentColor, fillOpacity: 0.15, radius: 5000 }).addTo(map);
+            activeMarker = L.circleMarker(coords, { color: accentColor, radius: 8 }).addTo(map);
+
+            addLiveRainRadar();
+            fetchAQI(coords[0], coords[1]);
+
+            // ✅ Step 2: Fetch Data From Java Backend
             const backendUrl = `http://localhost:8080/api/v1/weather/telemetry?lat=${coords[0]}&lon=${coords[1]}&city=${encodeURIComponent(cityName)}&country=${encodeURIComponent(countryName)}`;
 
             try {
                 const res = await fetch(backendUrl);
+                if (!res.ok) throw new Error("Backend Error");
                 const data = await res.json();
 
                 // Telemetry from Java
@@ -316,13 +333,12 @@
                 document.getElementById('hudRain').textContent = `Rainfall: ${data.rainfall} mm/h`;
                 document.getElementById('weatherCondition').textContent = data.alertMessage || "Safe";
 
-                // Alerts logic from Java Backend Response
+                // Alerts logic
                 const alertBanner = document.getElementById('alertBanner');
                 const alertTypeBadge = document.getElementById('alertTypeBadge');
                 
                 alertBanner.className = 'disaster-banner active';
                 document.body.classList.remove('red-alert-active');
-                let accentColor = "#10b981";
 
                 if (data.alertLevel === "RED") {
                     accentColor = "#ef4444";
@@ -351,19 +367,20 @@
                     lastAlertMessage = `Weather in ${cityName} is clear and safe.`;
                 }
 
-                // Map Updates
-                map.setView(coords, 10);
-                if (activeMarker) map.removeLayer(activeMarker);
-                if (activeCircle) map.removeLayer(activeCircle);
-
-                activeCircle = L.circle(coords, { color: accentColor, fillColor: accentColor, fillOpacity: 0.15, radius: 5000 }).addTo(map);
-                activeMarker = L.circleMarker(coords, { color: accentColor, radius: 8 }).addTo(map);
-
-                addLiveRainRadar();
-                fetchAQI(coords[0], coords[1]);
+                activeCircle.setStyle({ color: accentColor, fillColor: accentColor });
+                activeMarker.setStyle({ color: accentColor });
 
             } catch (e) {
-                console.error("Backend Connection Failed!", e);
+                console.warn("Java Backend is Unreachable. Showing Fallback UI.", e);
+                const alertBanner = document.getElementById('alertBanner');
+                const alertTypeBadge = document.getElementById('alertTypeBadge');
+                
+                alertBanner.className = 'disaster-banner active orange';
+                alertTypeBadge.className = 'alert-badge orange';
+                alertTypeBadge.textContent = "MAP ONLY";
+                document.getElementById('alertBannerTitle').textContent = `SECTOR LOCATED - ${cityName.toUpperCase()}`;
+                document.getElementById('alertBannerSub').textContent = "Map updated! (Java Backend offline on localhost:8080)";
+                document.getElementById('weatherCondition').textContent = "Backend Standby";
             }
         }
 
@@ -379,22 +396,30 @@
         }
 
         function autoDetectGPSLocation() {
+            document.getElementById('targetLocationTag').textContent = "DETECTING GPS...";
             if ("geolocation" in navigator) {
-                navigator.geolocation.getCurrentPosition(async (pos) => {
-                    const lat = pos.coords.latitude, lon = pos.coords.longitude;
-                    try {
-                        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
-                        const geoData = await geoRes.json();
-                        const addr = geoData.address || {};
-                        const exactArea = addr.suburb || addr.city || "Local Sector";
-                        updateDashboardByCoords([lat, lon], exactArea, addr.country || "India");
-                    } catch(e) {
-                        updateDashboardByCoords([lat, lon], "Local Sector", "India");
-                    }
-                }, () => {
-                    updateDashboardByCoords([23.0225, 72.5714], "Ahmedabad", "India");
-                });
+                navigator.geolocation.getCurrentPosition(
+                    async (pos) => {
+                        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+                        try {
+                            const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
+                            const geoData = await geoRes.json();
+                            const addr = geoData.address || {};
+                            const exactArea = addr.suburb || addr.city_district || addr.city || addr.town || "Local Sector";
+                            updateDashboardByCoords([lat, lon], exactArea, addr.country || "India");
+                        } catch(e) {
+                            updateDashboardByCoords([lat, lon], "GPS Sector", "India");
+                        }
+                    },
+                    (error) => {
+                        console.error("GPS Error:", error.message);
+                        alert("GPS detection failed or permission denied. Falling back to default sector.");
+                        updateDashboardByCoords([23.0225, 72.5714], "Ahmedabad", "India");
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
             } else {
+                alert("Geolocation is not supported by your browser.");
                 updateDashboardByCoords([23.0225, 72.5714], "Ahmedabad", "India");
             }
         }
@@ -471,13 +496,18 @@
             if (!city) return alert("Please select a City!");
 
             const query = `${city}, ${state || ''}, ${country}`;
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
-            const data = await res.json();
-            if (data && data.length > 0) {
-                updateDashboardByCoords([parseFloat(data[0].lat), parseFloat(data[0].lon)], city, country);
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                if (data && data.length > 0) {
+                    updateDashboardByCoords([parseFloat(data[0].lat), parseFloat(data[0].lon)], city, country);
+                }
+            } catch(e) {
+                alert("Location search failed. Check network connection.");
             }
         });
 
+        // Initialize App
         loadCountries();
         autoDetectGPSLocation();
     </script>
