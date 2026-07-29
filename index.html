@@ -92,6 +92,7 @@
         .card-main-weather { grid-column: span 12; }
         .card-emergency { grid-column: span 12; }
         .card-sub-metric { grid-column: span 6; }
+        .card-full-width { grid-column: span 12; }
 
         @media (min-width: 1024px) {
             .card-controls { grid-column: span 3; }
@@ -138,6 +139,24 @@
             border: 1px solid var(--accent-cyan); border-radius: 10px; color: var(--accent-cyan);
             font-size: 0.75rem; font-weight: 700; cursor: pointer;
         }
+
+        /* 🕒 HOURLY FORECAST HORIZONTAL SCROLL STYLING */
+        .hourly-scroll {
+            display: flex; gap: 0.8rem; overflow-x: auto; padding: 0.5rem 0;
+            scrollbar-width: thin; scrollbar-color: var(--accent-cyan) transparent;
+        }
+        .hourly-scroll::-webkit-scrollbar { height: 6px; }
+        .hourly-scroll::-webkit-scrollbar-thumb { background: var(--accent-cyan); border-radius: 10px; }
+
+        .hourly-card {
+            min-width: 90px; background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--card-border); border-radius: 12px;
+            padding: 0.6rem 0.5rem; text-align: center; display: flex;
+            flex-direction: column; align-items: center; justify-content: space-between; gap: 0.3rem;
+        }
+        .hourly-time { font-size: 0.7rem; color: var(--text-sub); font-family: 'Chakra Petch', sans-serif; }
+        .hourly-temp { font-size: 1rem; font-weight: 700; font-family: 'Chakra Petch', sans-serif; color: var(--text-main); }
+        .hourly-sub { font-size: 0.65rem; color: var(--accent-cyan); }
     </style>
 </head>
 <body>
@@ -154,7 +173,7 @@
             <span id="alertTypeBadge" class="alert-badge">ALERT</span>
             <strong id="alertBannerTitle" style="margin-left: 0.5rem;">WEATHER MONITORING</strong>
         </div>
-        <span id="alertBannerSub" style="font-size: 0.75rem;">Connecting telemetry...</span>
+        <span id="alertBannerSub" style="font-size: 0.75rem;">Fetching telemetry...</span>
     </div>
 
     <div class="bento-grid">
@@ -162,7 +181,7 @@
         <!-- CARD 1: SECTOR CONTROL -->
         <div class="bento-card card-controls">
             <div class="card-title">📍 Sector Control</div>
-            <button class="btn-gps" id="detectGpsBtn">🎯 DETECT GPS LOCATION</button>
+            <button class="btn-gps" id="detectGpsBtn">🎯 DETECT EXACT GPS LOCATION</button>
             
             <form id="controlForm">
                 <div class="form-group"><label>Country</label><select id="countrySelect"><option value="">Loading...</option></select></div>
@@ -176,10 +195,10 @@
         <div class="bento-card card-main-weather">
             <div class="card-title">
                 <span>📡 Telemetry Data</span>
-                <span id="targetLocationTag" style="color: var(--accent-cyan);">LOCATING...</span>
+                <span id="targetLocationTag" style="color: var(--accent-cyan); text-align: right; max-width: 70%; font-size: 0.72rem; word-break: break-word;">LOCATING...</span>
             </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.3rem;">
                 <div>
                     <span style="font-size: 0.85rem; color: var(--text-sub);" id="weatherCondition">Scanning...</span>
                     <span style="font-size: 1.8rem; font-weight: 800; font-family: 'Chakra Petch'; margin-left: 0.5rem;"><span id="hudTemp">--</span>°C</span>
@@ -205,6 +224,14 @@
             <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: auto;">
                 <button style="padding:0.65rem; background:rgba(37, 211, 102, 0.2); border:1px solid #25D366; border-radius:10px; color:#25D366; font-weight:bold; cursor:pointer;" onclick="sendWhatsAppSOS()">💬 WHATSAPP SOS</button>
                 <button style="padding:0.65rem; background:rgba(239, 68, 68, 0.2); border:1px solid var(--danger-red); border-radius:10px; color:#fca5a5; font-weight:bold; cursor:pointer;" onclick="playSiren()">🔊 SOUND SOS SIREN</button>
+            </div>
+        </div>
+
+        <!-- NEW CARD: 24-HOUR DETAILED WEATHER FORECAST SCROLL -->
+        <div class="bento-card card-full-width">
+            <div class="card-title">⏱️ 24-Hour Weather Forecast (Hourly Timeline)</div>
+            <div class="hourly-scroll" id="hourlyForecastContainer">
+                <div style="color: var(--text-sub); font-size: 0.8rem;">Loading 24-hour weather timeline...</div>
             </div>
         </div>
 
@@ -250,14 +277,16 @@
         const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
         let map = L.map('map', { zoomControl: false, layers: [darkLayer] }).setView([20.5937, 78.9629], 5);
 
-        let activeMarker = null, activeCircle = null, rainRadarLayer = null;
+        let activeMarker = null, activeCircle = null, rainRadarLayer = null, myChart = null;
         let lastAlertMessage = "";
 
+        // UTC Clock
         setInterval(() => {
             const clock = document.getElementById('sysClock');
             if (clock) clock.textContent = new Date().toUTCString().split(' ')[4] + ' UTC';
         }, 1000);
 
+        // Voice Alert (Text to Speech)
         function speakAlert() {
             if ('speechSynthesis' in window && lastAlertMessage) {
                 window.speechSynthesis.cancel();
@@ -267,6 +296,7 @@
             }
         }
 
+        // Emergency Siren Sound Generator
         function playSiren() {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             const osc = ctx.createOscillator();
@@ -280,6 +310,7 @@
             setTimeout(() => { osc.stop(); ctx.close(); }, 1500);
         }
 
+        // WhatsApp SOS Location Sharer
         function sendWhatsAppSOS() {
             if ("geolocation" in navigator) {
                 navigator.geolocation.getCurrentPosition((pos) => {
@@ -295,95 +326,145 @@
             }
         }
 
+        // Live Rain Radar Layer
         function addLiveRainRadar() {
             const radarTileUrl = 'https://tilecache.rainviewer.com/v2/radar/nowcast/256/{z}/{x}/{y}/2/1_1.png';
             if (rainRadarLayer) map.removeLayer(rainRadarLayer);
             rainRadarLayer = L.tileLayer(radarTileUrl, { opacity: 0.6, tileSize: 256 }).addTo(map);
         }
 
-        // 🚀 UPDATED & FIXED DASHBOARD UPDATER
-        async function updateDashboardByCoords(coords, cityName, countryName) {
-            document.getElementById('targetLocationTag').textContent = `${cityName.toUpperCase()}, ${countryName.toUpperCase()}`;
-            
-            // ✅ Step 1: Immediate Map Update
-            map.setView(coords, 10);
-            if (activeMarker) map.removeLayer(activeMarker);
-            if (activeCircle) map.removeLayer(activeCircle);
+        // Weather Code Interpretation
+        function decodeWeatherCode(code) {
+            if (code === 0) return "Clear Sky";
+            if (code <= 3) return "Partly Cloudy";
+            if (code <= 48) return "Foggy";
+            if (code <= 55) return "Light Drizzle";
+            if (code <= 65) return "Rainy";
+            if (code <= 77) return "Snowy";
+            if (code <= 82) return "Heavy Rain Showers";
+            if (code <= 99) return "Thunderstorm!";
+            return "Overcast";
+        }
 
-            let accentColor = "#38bdf8";
-            activeCircle = L.circle(coords, { color: accentColor, fillColor: accentColor, fillOpacity: 0.15, radius: 5000 }).addTo(map);
-            activeMarker = L.circleMarker(coords, { color: accentColor, radius: 8 }).addTo(map);
+        function getWeatherIcon(code) {
+            if (code === 0) return "☀️";
+            if (code <= 3) return "⛅";
+            if (code <= 48) return "🌫️";
+            if (code <= 65) return "🌧️";
+            if (code <= 82) return "🌧️";
+            if (code <= 99) return "🌩️";
+            return "☁️";
+        }
 
-            addLiveRainRadar();
-            fetchAQI(coords[0], coords[1]);
-
-            // ✅ Step 2: Fetch Data From Java Backend
-            const backendUrl = `http://localhost:8080/api/v1/weather/telemetry?lat=${coords[0]}&lon=${coords[1]}&city=${encodeURIComponent(cityName)}&country=${encodeURIComponent(countryName)}`;
-
+        // Main Weather Fetcher (Open-Meteo Free API)
+        async function fetchWeatherData(lat, lon, cityName, countryName) {
             try {
-                const res = await fetch(backendUrl);
-                if (!res.ok) throw new Error("Backend Error");
+                const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,rain,weather_code&hourly=temperature_2m,rain,wind_speed_10m,weather_code&forecast_days=1`);
                 const data = await res.json();
+                
+                const cur = data.current;
+                const temp = Math.round(cur.temperature_2m);
+                const wind = Math.round(cur.wind_speed_10m);
+                const hum = cur.relative_humidity_2m;
+                const pressure = Math.round(cur.surface_pressure);
+                const rain = cur.rain;
+                const condition = decodeWeatherCode(cur.weather_code);
 
-                // Telemetry from Java
-                document.getElementById('hudTemp').textContent = Math.round(data.temperature);
-                document.getElementById('hudWind').textContent = `${data.windSpeed} km/h`;
-                document.getElementById('hudHum').textContent = `Humidity: ${data.humidity}%`;
-                document.getElementById('hudPressure').textContent = `${data.pressure} mb`;
-                document.getElementById('hudRain').textContent = `Rainfall: ${data.rainfall} mm/h`;
-                document.getElementById('weatherCondition').textContent = data.alertMessage || "Safe";
+                document.getElementById('hudTemp').textContent = temp;
+                document.getElementById('hudWind').textContent = `${wind} km/h`;
+                document.getElementById('hudHum').textContent = `Humidity: ${hum}%`;
+                document.getElementById('hudPressure').textContent = `${pressure} mb`;
+                document.getElementById('hudRain').textContent = `Rainfall: ${rain} mm/h`;
+                document.getElementById('weatherCondition').textContent = condition;
 
-                // Alerts logic
+                // Render Hourly Forecast Cards (24 Hours)
+                renderHourlyForecastCards(data.hourly);
+
+                // Compute Risk Level Locally
+                let alertLevel = "GREEN";
+                let alertMsg = "Weather conditions are clear and stable.";
+
+                if (rain > 15 || wind > 60 || cur.weather_code >= 95) {
+                    alertLevel = "RED";
+                    alertMsg = `CRITICAL WARNING: Heavy rainfall (${rain}mm/h) and severe weather detected!`;
+                } else if (rain > 5 || wind > 35 || cur.weather_code >= 61) {
+                    alertLevel = "ORANGE";
+                    alertMsg = `MODERATE RISK: Rainy conditions (${rain}mm/h). Exercise caution.`;
+                }
+
+                // Update UI Alerts & Map Color
                 const alertBanner = document.getElementById('alertBanner');
                 const alertTypeBadge = document.getElementById('alertTypeBadge');
                 
                 alertBanner.className = 'disaster-banner active';
                 document.body.classList.remove('red-alert-active');
+                let accentColor = "#10b981";
 
-                if (data.alertLevel === "RED") {
+                if (alertLevel === "RED") {
                     accentColor = "#ef4444";
                     document.body.classList.add('red-alert-active');
                     alertBanner.className = 'disaster-banner active red';
                     alertTypeBadge.className = 'alert-badge red';
                     alertTypeBadge.textContent = "RED ALERT";
                     document.getElementById('alertBannerTitle').textContent = `HEAVY RAIN WARNING - ${cityName.toUpperCase()}`;
-                    document.getElementById('alertBannerSub').textContent = data.alertMessage;
-                    lastAlertMessage = `Red alert warning for ${cityName}. Heavy rainfall active.`;
-                } else if (data.alertLevel === "ORANGE") {
+                    document.getElementById('alertBannerSub').textContent = alertMsg;
+                    lastAlertMessage = `Red alert warning for ${cityName}. ${alertMsg}`;
+                } else if (alertLevel === "ORANGE") {
                     accentColor = "#f97316";
                     alertBanner.className = 'disaster-banner active orange';
                     alertTypeBadge.className = 'alert-badge orange';
                     alertTypeBadge.textContent = "ORANGE ALERT";
                     document.getElementById('alertBannerTitle').textContent = `MODERATE RAIN WATCH - ${cityName.toUpperCase()}`;
-                    document.getElementById('alertBannerSub').textContent = data.alertMessage;
-                    lastAlertMessage = `Orange alert in ${cityName}. Moderate rainfall detected.`;
+                    document.getElementById('alertBannerSub').textContent = alertMsg;
+                    lastAlertMessage = `Orange alert in ${cityName}. ${alertMsg}`;
                 } else {
                     accentColor = "#10b981";
                     alertBanner.className = 'disaster-banner active green';
                     alertTypeBadge.className = 'alert-badge green';
                     alertTypeBadge.textContent = "CLEAR";
                     document.getElementById('alertBannerTitle').textContent = `CONDITIONS SAFE - ${cityName.toUpperCase()}`;
-                    document.getElementById('alertBannerSub').textContent = data.alertMessage;
+                    document.getElementById('alertBannerSub').textContent = alertMsg;
                     lastAlertMessage = `Weather in ${cityName} is clear and safe.`;
                 }
 
-                activeCircle.setStyle({ color: accentColor, fillColor: accentColor });
-                activeMarker.setStyle({ color: accentColor });
+                if (activeCircle) activeCircle.setStyle({ color: accentColor, fillColor: accentColor });
+                if (activeMarker) activeMarker.setStyle({ color: accentColor });
+
+                // Render Chart
+                renderChart(data.hourly.time.slice(0, 12).map(t => t.split('T')[1]), data.hourly.temperature_2m.slice(0, 12));
 
             } catch (e) {
-                console.warn("Java Backend is Unreachable. Showing Fallback UI.", e);
-                const alertBanner = document.getElementById('alertBanner');
-                const alertTypeBadge = document.getElementById('alertTypeBadge');
-                
-                alertBanner.className = 'disaster-banner active orange';
-                alertTypeBadge.className = 'alert-badge orange';
-                alertTypeBadge.textContent = "MAP ONLY";
-                document.getElementById('alertBannerTitle').textContent = `SECTOR LOCATED - ${cityName.toUpperCase()}`;
-                document.getElementById('alertBannerSub').textContent = "Map updated! (Java Backend offline on localhost:8080)";
-                document.getElementById('weatherCondition').textContent = "Backend Standby";
+                console.error("Failed to fetch weather data:", e);
             }
         }
 
+        // Render 24 Hourly Forecast Scroll List
+        function renderHourlyForecastCards(hourly) {
+            const container = document.getElementById('hourlyForecastContainer');
+            if (!hourly || !hourly.time) return;
+
+            let html = "";
+            for (let i = 0; i < hourly.time.length && i < 24; i++) {
+                const timeStr = hourly.time[i].split('T')[1];
+                const temp = Math.round(hourly.temperature_2m[i]);
+                const rain = hourly.rain[i];
+                const wind = Math.round(hourly.wind_speed_10m[i]);
+                const icon = getWeatherIcon(hourly.weather_code[i]);
+
+                html += `
+                    <div class="hourly-card">
+                        <div class="hourly-time">${timeStr}</div>
+                        <div style="font-size: 1.2rem;">${icon}</div>
+                        <div class="hourly-temp">${temp}°C</div>
+                        <div class="hourly-sub">🌧️ ${rain}mm</div>
+                        <div class="hourly-sub">💨 ${wind}k/h</div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
+        // AQI Fetcher
         async function fetchAQI(lat, lon) {
             try {
                 const res = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,uv_index`);
@@ -395,8 +476,57 @@
             } catch(e){}
         }
 
+        // Master UI Update Coordinator
+        function updateDashboardByCoords(coords, cityName, countryName) {
+            document.getElementById('targetLocationTag').textContent = `${cityName.toUpperCase()}${countryName ? ', ' + countryName.toUpperCase() : ''}`;
+            
+            // Map Placement with higher zoom for precise live location
+            map.setView(coords, 15);
+            if (activeMarker) map.removeLayer(activeMarker);
+            if (activeCircle) map.removeLayer(activeCircle);
+
+            let defaultColor = "#38bdf8";
+            activeCircle = L.circle(coords, { color: defaultColor, fillColor: defaultColor, fillOpacity: 0.15, radius: 800 }).addTo(map);
+            activeMarker = L.circleMarker(coords, { color: defaultColor, radius: 8 }).addTo(map);
+
+            addLiveRainRadar();
+            fetchAQI(coords[0], coords[1]);
+            fetchWeatherData(coords[0], coords[1], cityName, countryName);
+        }
+
+        // Hourly Chart Generator
+        function renderChart(labels, temps) {
+            const ctx = document.getElementById('weatherChart').getContext('2d');
+            if (myChart) myChart.destroy();
+
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Temp (°C)',
+                        data: temps,
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { display: false } },
+                        y: { ticks: { color: '#9ca3af', font: { size: 9 } }, grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+                    }
+                }
+            });
+        }
+
+        // 🎯 EXACT LIVE GPS LOCATION HANDLER WITH HIGH ACCURACY REVERSE GEOCODING
         function autoDetectGPSLocation() {
-            document.getElementById('targetLocationTag').textContent = "DETECTING GPS...";
+            document.getElementById('targetLocationTag').textContent = "FETCHING EXACT GPS LOCATION...";
             if ("geolocation" in navigator) {
                 navigator.geolocation.getCurrentPosition(
                     async (pos) => {
@@ -405,18 +535,31 @@
                             const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
                             const geoData = await geoRes.json();
                             const addr = geoData.address || {};
-                            const exactArea = addr.suburb || addr.city_district || addr.city || addr.town || "Local Sector";
-                            updateDashboardByCoords([lat, lon], exactArea, addr.country || "India");
+                            
+                            // Extract street, landmark, sector, or exact building location
+                            const street = addr.road || addr.street || addr.pedestrian || addr.path || "";
+                            const area = addr.suburb || addr.neighbourhood || addr.residential || addr.quarter || addr.locality || "";
+                            const district = addr.city_district || addr.city || addr.town || addr.village || "";
+                            
+                            let exactLocationParts = [];
+                            if (street) exactLocationParts.push(street);
+                            if (area && area !== street) exactLocationParts.push(area);
+                            if (district && district !== area) exactLocationParts.push(district);
+
+                            let exactLocationString = exactLocationParts.join(", ");
+                            if (!exactLocationString) exactLocationString = "Exact Sector Spot";
+
+                            updateDashboardByCoords([lat, lon], exactLocationString, addr.country || "India");
                         } catch(e) {
-                            updateDashboardByCoords([lat, lon], "GPS Sector", "India");
+                            updateDashboardByCoords([lat, lon], `${lat.toFixed(4)}, ${lon.toFixed(4)}`, "GPS Location");
                         }
                     },
                     (error) => {
                         console.error("GPS Error:", error.message);
-                        alert("GPS detection failed or permission denied. Falling back to default sector.");
+                        alert("GPS permission denied or unavailable. Defaulting to Ahmedabad.");
                         updateDashboardByCoords([23.0225, 72.5714], "Ahmedabad", "India");
                     },
-                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
                 );
             } else {
                 alert("Geolocation is not supported by your browser.");
@@ -424,6 +567,7 @@
             }
         }
 
+        // Dropdown Cascade Helpers
         const countrySelect = document.getElementById('countrySelect');
         const stateSelect = document.getElementById('stateSelect');
         const citySelect = document.getElementById('citySelect');
@@ -507,7 +651,7 @@
             }
         });
 
-        // Initialize App
+        // App Launch
         loadCountries();
         autoDetectGPSLocation();
     </script>
